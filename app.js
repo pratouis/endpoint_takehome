@@ -8,62 +8,53 @@ app.engine('.hbs', exphbs({extname: '.hbs', defaultLayout: 'main'}));
 app.set('view engine', 'hbs');
 app.set('views', path.join(__dirname, 'views'));
 
-//set up filestream
-import fs from 'fs';
-import es from 'event-stream';
-import _ from 'underscore';
-import sReduce from 'stream-reduce';
+import mongoose from 'mongoose';
+import Feature from './models/feature';
+if (! process.env.MONGODB_URI) {
+  throw new Error("MONGODB_URI is not in the environmental variables. Try running 'source env.sh'");
+}
+mongoose.connection.on('connected', function() {
+  console.log('Success: connected to MongoDb!');
+});
+mongoose.connection.on('error', function() {
+  console.log('Error connecting to MongoDb. Check MONGODB_URI in env.sh');
+  process.exit(1);
+});
 
+mongoose.connect(process.env.MONGODB_URI);
+let totalCount = Feature.count().catch(err => console.log('error in counting: ', err));
+let last = Math.round(totalCount/10);
 app.get('/listings', (req, res, next) => {
-  let header = null;
-  request('https://s3.amazonaws.com/opendoor-problems/listing-details.csv')
-           .pipe(es.split('\n'))
-           .pipe(es.mapSync((data) => { return data.split(","); }))
-           .pipe(es.mapSync((data) => {
-             if(data[0] === 'id'){
-               header = data;
-               return;
-             }
-             if(!data[0]) return;
-             return _.object(header,data);
-           }))
-           .pipe(es.mapSync((data) =>{
+  console.log(req);
+  let pageNum = parseInt(req.query.page || 1)-1;
+  console.log('PageNum: ', pageNum);
+  Feature.find({
+    'data.properties.price' : {$gte: req.query.min_price || 0, $lte: req.query.max_price || Infinity},
+    'data.properties.bedrooms': {$gte: req.query.min_bed || 0, $lte: req.query.max_bed || Infinity},
+    'data.properties.bathrooms': {$gte: req.query.max_bath || 0, $lte: req.query.max_bath || Infinity}
+  })
+  .skip(10*pageNum)
+  .limit(10)
+  .exec()
+  .catch((err) => {
+    console.log('error in finding: ',err);
+    res.status(500).send(err);
+  })
+  .then((results) => {
+    // res.links({
+    //   next: '/listings/users?page=2',
+    //   last: 'http://api.example.com/users?page=5'
+    // });
+    let fullUrl = req.protocol + '://' + req.get('host') + req.originalUrl.split('&page')[0];
+    res.links({
+      first: `${fullUrl}&page=1`,
+      last: `${fullUrl}&page=${last}`,
+      prev: `${fullUrl}&page=${pageNum === 1 ? 1: pageNum-1}`,
+      next: `${fullUrl}&page=${pageNum === last ? last: pageNum+1}`
+    });
 
-             if(data.price < (req.query.min_price || 0)) {return;}
-             if(data.price > (req.query.max_price || Infinity)) {return;}
-             if(data.bedrooms < (req.query.min_bed || 0)) {return;}
-             if(data.bedrooms > (req.query.max_bed || Infinity)) {return;}
-             if(data.bathrooms < (req.query.min_bath || 0)) {return;}
-             if(data.bathrooms >( req.query.max_bath || Infinity)) {return;}
-             // return {
-             //   type: "Feature",
-             //   geometry: {type: "Point", coordinates: [data.lat, data.lng]},
-             //   properties: {
-             //     "id": data.id,
-             //     "street": data.street,
-             //     "price": data.price,
-             //     "bedrooms": data.bedrooms,
-             //     "bathrooms": data.bathrooms,
-             //     "sq_ft": data.sq_ft
-             //   }
-             // };
-             return data;
-           }))
-           .pipe(sReduce((acc, data) => {
-             return acc.concat(data)
-           }, []))
-           .on('data', (data) => {
-             if(!data){
-               res.status(500).send('unable to filter data');
-             }
-             // let houses = {type: "FeatureCollection", "features": data};
-             res.render('listings.hbs', {
-               query: req.query,
-               header: header,
-               houses: data
-             });
-             // res.status(200).json(houses);
-           })
+    res.status(200).json(results);
+  })
 })
 
 
