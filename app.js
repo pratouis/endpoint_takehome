@@ -25,9 +25,7 @@ mongoose.connect(process.env.MONGODB_URI);
 let totalCount = Feature.count().catch(err => console.log('error in counting: ', err));
 let last = Math.round(totalCount/10);
 app.get('/listings', (req, res, next) => {
-  console.log(req);
   let pageNum = parseInt(req.query.page || 1)-1;
-  console.log('PageNum: ', pageNum);
   Feature.find({
     'data.properties.price' : {$gte: req.query.min_price || 0, $lte: req.query.max_price || Infinity},
     'data.properties.bedrooms': {$gte: req.query.min_bed || 0, $lte: req.query.max_bed || Infinity},
@@ -41,10 +39,6 @@ app.get('/listings', (req, res, next) => {
     res.status(500).send(err);
   })
   .then((results) => {
-    // res.links({
-    //   next: '/listings/users?page=2',
-    //   last: 'http://api.example.com/users?page=5'
-    // });
     let fullUrl = req.protocol + '://' + req.get('host') + req.originalUrl.split('&page')[0];
     res.links({
       first: `${fullUrl}&page=1`,
